@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>🎮 Vamos jogar</title>
+<style>
+html, body { height:100%; margin:0; background:#000; color:#0f0; font-family:Consolas, Menlo, monospace; }
+canvas { display:block; width:100vw; height:100vh; }
+.wrap { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:#000; z-index:5; }
+.ui { position:fixed; inset:0; pointer-events:none; z-index:10; }
+.topbar { position:absolute; top:0; left:0; right:0; height:48px; display:flex; align-items:center; justify-content:space-between; padding:0 12px; color:#000; opacity:.9; }
+.badge { font-weight:700; letter-spacing:.08em; }
+.btn { pointer-events:auto; border:1px solid #0f0; color:#0f0; background:transparent; padding:10px 16px; border-radius:10px; cursor:pointer; font-weight:600; transition: transform .1s ease, background .2s; }
+.btn:hover { transform: translateY(-1px); background:rgba(0,255,0,.08); }
+#startBtn { font-size:18px; }
+#exitBtn { display:none; border:1px solid #000; /* contorno preto */ color:#0f0; }
+.center { text-align:center; }
+.hint { color:#8f8; opacity:.8; margin-top:10px; font-size:14px; }
+.msgFinal { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background: radial-gradient(ellipse at center, rgba(0,30,0,.95) 0%, rgba(0,0,0,.98) 60%, #000 100%); color:#c8ffc8; text-align:center; padding:24px; z-index:20; }
+.msgFinal h1 { margin:0 0 10px; font-size:28px; }
+.msgFinal p { margin:4px 0; font-size:16px; color:#aef0ae; }
+#logBox { position:fixed; bottom:20px; left:20px; color:#0f0; font-size:16px; font-family:Consolas, monospace; background:rgba(0,0,0,0.7); padding:10px 16px; border:1px solid #0f0; border-radius:8px; max-width:90vw; display:none; z-index:15; white-space:pre-line; }
+.showExit #exitBtn { display:inline-block; }
+</style>
+</head>
+<body>
+
+<canvas id="matrix"></canvas>
+
+<div class="wrap" id="overlay">
+  <div class="center">
+    <h1 style="color:#0f0; margin:0 0 12px;">Entre se tiver coragem ⚡💀</h1>
+    <button id="startBtn" class="btn">Games 🎮👾🕹️</button>
+    <div class="hint">Será que você consegue chegar até o final?👾🔥</div>
+  </div>
+</div>
+
+<div class="ui">
+  <div class="topbar">
+    <div class="badge"> </div>
+    <button id="exitBtn" class="btn"> </button>
+  </div>
+</div>
+
+<div id="logBox"></div>
+
+<div class="msgFinal" id="msgFinal">
+  <div>
+    <h1>😅😎 Ufa! Relaxa, só uma pegadinha!</h1>
+    <p>Nenhum arquivo foi deletado, seu sistema está 100% seguro.</p>
+    <p>Você acabou de entrar no “modo troll gamer” 🎮👾 Fique esperto 👀</p>
+    <button class="btn" onclick="sair()">Sair</button>
+  </div>
+</div>
+
+<script>
+const el = (id) => document.getElementById(id);
+
+async function pedirTelaCheia() {
+  const docEl = document.documentElement;
+  try { 
+    if(docEl.requestFullscreen) await docEl.requestFullscreen();
+    else if(docEl.webkitRequestFullscreen) await docEl.webkitRequestFullscreen();
+    else if(docEl.msRequestFullscreen) await docEl.msRequestFullscreen();
+  } catch(_) {}
+}
+
+function beep(times=2, freq=880, dur=120) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    let when = ctx.currentTime + 0.02;
+    for(let i=0;i<times;i++){
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.001, when);
+      gain.gain.exponentialRampToValueAtTime(0.2, when+0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, when + dur/1000);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(when);
+      osc.stop(when+dur/1000+0.02);
+      when += (dur + 120)/1000;
+    }
+  } catch(_) {}
+}
+
+function vibrar(padrao=[80,60,80]) { if(navigator.vibrate) navigator.vibrate(padrao); }
+
+function sair() {
+  if(document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
+  el('msgFinal').style.display = 'none';
+  el('overlay').style.display = 'flex';
+  cancelAnimationFrame(state.raf);
+  state.running = false;
+  el('logBox').style.display = 'none';
+}
+
+// ---------- Matrix ----------
+const canvas = el('matrix');
+const ctx = canvas.getContext('2d');
+
+const state = {
+  w:0, h:0, fontSize:16, columns:0,
+  drops:[], chars:'01ABCDEFGHIJKLMNOPQRSTUVWXYZ@#$%&*',
+  running:false, raf:null, startTime:0
+};
+
+function resize(){
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  canvas.width = Math.floor(window.innerWidth*dpr);
+  canvas.height = Math.floor(window.innerHeight*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  state.fontSize = Math.max(14, Math.min(28, Math.floor(window.innerWidth/48)));
+  ctx.font = state.fontSize+"px monospace";
+  state.w = window.innerWidth;
+  state.h = window.innerHeight;
+  state.columns = Math.ceil(state.w/state.fontSize);
+  state.drops = Array(state.columns).fill(0).map(()=>Math.floor(Math.random()*(-50)));
+}
+
+function draw(){
+  ctx.fillStyle = "rgba(0,0,0,0.08)";
+  ctx.fillRect(0,0,state.w,state.h);
+
+  for(let i=0;i<state.columns;i++){
+    const char = state.chars.charAt(Math.floor(Math.random()*state.chars.length));
+    const x = i*state.fontSize;
+    const y = state.drops[i]*state.fontSize;
+    ctx.fillStyle = "#0f0";
+    ctx.fillText(char,x,y);
+    if(y>state.h && Math.random()>0.975) state.drops[i]=0;
+    else state.drops[i]++;
+  }
+
+// alerta piscando com efeito de pontos
+const dots = Math.floor((performance.now() / 500) % 4); // 0,1,2,3
+let mensagem = "[ ALERTA ] ☠️ Monitorando processos";
+for (let i = 0; i < dots; i++) mensagem += ".";
+ctx.fillStyle = (Math.floor(performance.now() / 500) % 2 === 0) ? "#ff0000" : "#0f0";
+ctx.fillText(mensagem, 12, 32);
+
+// controle de tempo da simulação
+const elapsed = (performance.now() - state.startTime) / 1000;
+if (elapsed > 12 && !document.body.classList.contains('showExit')) {
+    document.body.classList.add('showExit');
+}
+if (elapsed > 18) {
+    finalizarSimulacao();
+    return;
+}
+
+state.raf = requestAnimationFrame(draw);
+}
+
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+async function fake_virus(){
+  const mensagens = [
+    "Escaneando portas abertas...",
+    "Copiando os seus arquivos.",
+    "Copiando os seus arquivos..",
+    "Copiando os seus arquivos...",
+    "Enviando seus dados para o Hacker...",
+    "Apagando rastros...",
+    "Processo concluído com sucesso…"
+  ];
+  const logBox = el('logBox');
+  logBox.style.display='block';
+  logBox.innerText="Iniciando invasão do sistema...";
+  await sleep(2000);
+  for(let msg of mensagens){
+    logBox.innerText = msg;
+    await sleep(1000 + Math.random()*1500);
+  }
+  logBox.innerText="Seus dados foram copiados com sucesso! 💀Pediremos resgate em 24h... :)\n💰💸💳";
+}
+
+// tocar sons finais
+async function tocarSonsFinal(){
+  beep(1,440,150);
+  await sleep(300);
+  beep(2,880,120);
+  const audio = new Audio('risada.mp3');
+  audio.play();
+}
+
+function iniciar(){
+  if(state.running) return;
+  state.running=true;
+  state.startTime=performance.now();
+  el('overlay').style.display='none';
+  beep(2,950,140);
+  vibrar([80,60,80,60,80]);
+  resize();
+  state.raf=requestAnimationFrame(draw);
+  fake_virus();
+}
+
+function finalizarSimulacao(){
+  cancelAnimationFrame(state.raf);
+  beep(3,520,120);
+  vibrar([120,80,120]);
+  el('msgFinal').style.display='flex';
+  state.running=false;
+  tocarSonsFinal();
+}
+
+window.addEventListener('resize',resize);
+el('startBtn').addEventListener('click', async()=>{ await pedirTelaCheia(); iniciar(); });
+el('overlay').addEventListener('touchstart', async(e)=>{ e.preventDefault(); await pedirTelaCheia(); iniciar(); },{passive:false});
+document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') sair(); });
+el('exitBtn').addEventListener('click', sair);
+</script>
+</body>
+</html>
